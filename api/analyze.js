@@ -4,15 +4,17 @@ const crypto = require("crypto");
 const USERNAME_REGEX = /^[A-Za-z0-9_]{1,15}$/;
 
 const NICHE_KEYWORDS = {
-  ai: ["ai", "gpt", "ml", "llm", "automation", "prompt"],
+  ai: ["ai", "gpt", "ml", "llm", "automation", "prompt", "machine learning"],
   growth: ["growth", "audience", "followers", "community", "creator", "personal brand"],
-  marketing: ["marketing", "seo", "ads", "brand", "demand", "funnel"],
+  marketing: ["marketing", "seo", "ads", "brand", "demand", "funnel", "ppc"],
   saas: ["saas", "product", "startup", "b2b", "founder", "onboarding"],
   dev: ["dev", "developer", "code", "engineering", "javascript", "software", "web"],
-  design: ["design", "ux", "ui", "creative"],
+  design: ["design", "ux", "ui", "creative", "figma"],
   finance: ["finance", "money", "invest", "wealth", "trading", "portfolio"],
   fitness: ["fitness", "health", "gym", "coach", "training"],
-  ecommerce: ["ecom", "ecommerce", "shopify", "dtc", "store"]
+  ecommerce: ["ecom", "ecommerce", "shopify", "dtc", "store"],
+  web3: ["web3", "defi", "crypto", "blockchain", "nft", "dao", "moderator"],
+  operator: []
 };
 
 const NICHE_PROFILES = {
@@ -61,6 +63,54 @@ const NICHE_PROFILES = {
       "ask for the workflow checklist",
       "request the AI stack breakdown",
       "DM me AI for the template"
+    ]
+  },
+
+  web3: {
+    label: "Web3 and Crypto",
+    audience: "builders and DeFi operators",
+    followerBias: 1.20,
+    engagementBias: 1.25,
+    hookBias: 1.15,
+    desiredOutcomes: [
+      "build protocols that survive market cycles",
+      "turn liquidity into sustainable TVL",
+      "create governance that actually works"
+    ],
+    pains: [
+      "rug pull fears",
+      "liquidity lockup mismanagement",
+      "vampire attacks from competitors"
+    ],
+    mechanisms: [
+      "vesting schedules with cliffs",
+      "liquidity bootstrapping pools",
+      "on-chain governance frameworks"
+    ],
+    metrics: [
+      "TVL growth",
+      "holder retention",
+      "governance participation"
+    ],
+    beliefs: [
+      "decentralization fixes everything",
+      "token price equals success",
+      "code is law without exceptions"
+    ],
+    enemies: [
+      "centralized bridges",
+      "opaque tokenomics",
+      "extractive MEV bots"
+    ],
+    proof: [
+      "on-chain analytics",
+      "auditor reports",
+      "governance vote records"
+    ],
+    ctas: [
+      "ask for the tokenomics breakdown",
+      "request the audit checklist",
+      "DM me WEB3 for the framework"
     ]
   },
 
@@ -693,14 +743,15 @@ function createCustomNiche(topic) {
   };
 }
 
-function inferNiche(username, body) {
+function inferNiche(username, body, bioText) {
   const explicitTopic = sanitizeText(
     body.topic || body.niche || body.cluster || body.industry || ""
   );
 
-  const haystack = `${explicitTopic} ${username}`.toLowerCase();
+  const haystack = `${explicitTopic} ${username} ${bioText}`.toLowerCase();
 
   for (const [key, keywords] of Object.entries(NICHE_KEYWORDS)) {
+    if (key === "operator") continue;
     if (keywords.some((keyword) => haystack.includes(keyword))) {
       return {
         key,
@@ -722,55 +773,6 @@ function inferNiche(username, body) {
   };
 }
 
-function simulateXApiV2Profile(username, niche, rng) {
-  const accountAgeDays = Math.floor(120 + rng() * 2200);
-
-  const followerBase = Math.pow(10, 2.05 + rng() * 3.15);
-  const followerCount = clamp(
-    Math.floor(followerBase * niche.followerBias),
-    46,
-    1800000
-  );
-
-  const followingCount = clamp(
-    Math.floor(followerCount * (0.06 + rng() * 1.7)),
-    18,
-    220000
-  );
-
-  const tweetCount = Math.floor(accountAgeDays * (0.12 + rng() * 2.7));
-
-  const listedCount = Math.floor(
-    followerCount * (0.0008 + rng() * 0.028)
-  );
-
-  const createdAt = new Date(
-    Date.now() - accountAgeDays * 86400000
-  ).toISOString();
-
-  const description = `${pick(
-    rng,
-    niche.desiredOutcomes,
-    "Building systems"
-  )} for ${niche.audience}. Tracking ${pick(
-    rng,
-    niche.metrics,
-    "output"
-  )}.`;
-
-  return {
-    username,
-    created_at: createdAt,
-    description,
-    public_metrics: {
-      followers_count: followerCount,
-      following_count: followingCount,
-      tweet_count: tweetCount,
-      listed_count: listedCount
-    }
-  };
-}
-
 async function fetchLiveXProfile(username) {
   const bearer = clean(
     process.env.X_BEARER_TOKEN ||
@@ -778,20 +780,28 @@ async function fetchLiveXProfile(username) {
       process.env.TWITTER_BEARER_TOKEN
   );
 
-  if (!bearer) return null;
+  if (!bearer) {
+    return {
+      profile: null,
+      error: "No X API bearer token configured. Set X_BEARER_TOKEN environment variable."
+    };
+  }
 
   if (typeof fetch !== "function" || typeof AbortController !== "function") {
-    return null;
+    return {
+      profile: null,
+      error: "Fetch API not available in this environment."
+    };
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6500);
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
   try {
     const response = await fetch(
       `https://api.twitter.com/2/users/by/username/${encodeURIComponent(
         username
-      )}?user.fields=public_metrics,description,created_at`,
+      )}?user.fields=public_metrics,description,created_at,verified,entities`,
       {
         headers: {
           Authorization: `Bearer ${bearer}`
@@ -800,36 +810,35 @@ async function fetchLiveXProfile(username) {
       }
     );
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      return {
+        profile: null,
+        error: `X API returned ${response.status}: ${errorText}`
+      };
+    }
 
     const json = await response.json().catch(() => ({}));
 
-    return json?.data || null;
-  } catch {
-    return null;
+    if (!json?.data) {
+      return {
+        profile: null,
+        error: "X API returned no user data."
+      };
+    }
+
+    return {
+      profile: json.data,
+      error: null
+    };
+  } catch (error) {
+    return {
+      profile: null,
+      error: `Fetch failed: ${error.message || "Network error"}`
+    };
   } finally {
     clearTimeout(timeout);
   }
-}
-
-async function getXProfile(username, niche, rng) {
-  const liveProfile = await fetchLiveXProfile(username);
-
-  if (
-    liveProfile &&
-    liveProfile.public_metrics &&
-    Number.isFinite(liveProfile.public_metrics.followers_count)
-  ) {
-    return {
-      profile: liveProfile,
-      source: "live X API v2"
-    };
-  }
-
-  return {
-    profile: simulateXApiV2Profile(username, niche, rng),
-    source: "simulated X API v2"
-  };
 }
 
 function parseFootprint(body) {
@@ -965,12 +974,15 @@ function buildMetrics(username, profile, niche, rng, source, footprint) {
     350
   );
 
+  const verified = Boolean(profile.verified);
+
   const preliminaryMetrics = {
     followerCount,
     followingCount,
     tweetCount,
     accountAgeDays,
-    postsPerWeek
+    postsPerWeek,
+    verified
   };
 
   const botNoise = Math.floor(rng() * 16);
@@ -993,6 +1005,8 @@ function buildMetrics(username, profile, niche, rng, source, footprint) {
 
   if (preliminaryBotScore > 65) engagementRate *= 0.48;
   else if (preliminaryBotScore > 45) engagementRate *= 0.82;
+
+  if (verified) engagementRate *= 1.15;
 
   if (footprint) {
     engagementRate *=
@@ -1043,13 +1057,24 @@ function buildMetrics(username, profile, niche, rng, source, footprint) {
     engagementRate,
     botScore,
     hookRating,
+    verified,
     footprint
   };
 }
 
-function buildStrategyBadge(metrics) {
+function buildStrategyBadge(metrics, niche) {
   if (metrics.botScore >= 70) {
     return "Spam Risk Containment";
+  }
+
+  if (niche.key === "web3") {
+    if (metrics.engagementRate >= 4.5 && metrics.followerCount >= 10000) {
+      return "Web3 Community Architect Vector";
+    }
+    if (metrics.followerCount < 2500) {
+      return "DeFi Protocol Bootstrap";
+    }
+    return "Web3 Infrastructure Builder";
   }
 
   if (metrics.followerCount < 800 && metrics.engagementRate < 1.2) {
@@ -1083,7 +1108,9 @@ function buildFailureDiagnosis(username, metrics, niche) {
       metrics.followerCount
     )} followers, ${metrics.engagementRate}% engagement, ${
       metrics.botScore
-    }/100 bot/spam probability, ${metrics.postsPerWeek} posts/week lifetime average.`
+    }/100 bot/spam probability, ${metrics.postsPerWeek} posts/week lifetime average${
+      metrics.verified ? " (verified account)" : ""
+    }.`
   );
 
   const issues = [];
@@ -1320,21 +1347,28 @@ module.exports = async (req, res) => {
     const seed = hashSeed(username.toLowerCase());
     const rng = mulberry32(seed);
 
-    const niche = inferNiche(username, body);
-    const footprint = parseFootprint(body);
+    const { profile: liveProfile, error: fetchError } = await fetchLiveXProfile(username);
 
-    const { profile, source } = await getXProfile(username, niche, rng);
+    if (!liveProfile) {
+      return sendJson(res, 502, {
+        error: `Failed to fetch live profile data: ${fetchError}`
+      });
+    }
+
+    const bioText = clean(liveProfile.description || "");
+    const niche = inferNiche(username, body, bioText);
+    const footprint = parseFootprint(body);
 
     const metrics = buildMetrics(
       username,
-      profile,
+      liveProfile,
       niche,
       rng,
-      source,
+      "live X API v2",
       footprint
     );
 
-    const strategyBadge = buildStrategyBadge(metrics);
+    const strategyBadge = buildStrategyBadge(metrics, niche);
 
     const failureDiagnosis = buildFailureDiagnosis(username, metrics, niche);
 
@@ -1349,6 +1383,7 @@ module.exports = async (req, res) => {
       followerCount: metrics.followerCount,
       engagementRate: metrics.engagementRate,
       botScore: metrics.botScore,
+      verified: metrics.verified,
       recommendations,
       suggestedPosts
     });
@@ -1379,4 +1414,4 @@ function getErrorMessage(error) {
   } catch {
     return "Unexpected error.";
   }
-      }
+                       }
